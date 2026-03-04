@@ -16,3 +16,4 @@ Come da specifiche globali nel file config.toml, il file agent.md è stato aggio
 
 6. aggiunta di un nuovo task chiamato connect dove passiamo il file kubeconfig e viene fatta una prova di connnesione al cluster e vengono mostrati lo stato dei nodi e la versione. 
 
+7. aggiunta di un nuovo task che permette tramite Aruba api di fare provisioning del'elastic ip da aggangiare al cluster per pubblicare all'esterno il servizio e usare KAAS_API_KEY per autenticarsi

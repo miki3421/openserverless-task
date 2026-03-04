@@ -100,6 +100,62 @@ tasks:
       - $OPS config apihost "{{._apihost_}}" --protocol=https --tls:test@nuvolaris.org
       - $OPS setup cluster
 
+  elastic-ip:
+    silent: true
+    desc: provisiona e associa un Elastic IP via Aruba API usando KAAS_API_KEY
+    cmds:
+      - curl --version >/dev/null || die "curl command not found"
+      - jq --version >/dev/null || die "jq command not found"
+      - |
+        if test -f "$HOME/.kube/.env"
+        then set -a; . "$HOME/.kube/.env"; set +a
+        elif test -f ".env"
+        then set -a; . ".env"; set +a
+        fi
+      - test -n "$KAAS_API_KEY" || die "missing KAAS_API_KEY (set it in .env)"
+      - test -n "$KAAS_API_BASE_URL" || die "missing KAAS_API_BASE_URL (set it in .env)"
+      - test -n "$KAAS_PROJECT_ID" || die "missing KAAS_PROJECT_ID (set it in .env)"
+      - test -n "$KAAS_CLUSTER_ID" || die "missing KAAS_CLUSTER_ID (set it in .env)"
+      - test -n "$KAAS_REGION" || die "missing KAAS_REGION (set it in .env)"
+      - |
+        SERVICE_NAMESPACE="${KAAS_SERVICE_NAMESPACE:-ingress-nginx}"
+        SERVICE_NAME="${KAAS_SERVICE_NAME:-ingress-nginx-controller}"
+        EIP_NAME="${KAAS_EIP_NAME:-nuvolaris-eip}"
+        CREATE_URL="${KAAS_EIP_CREATE_URL:-$KAAS_API_BASE_URL/v1/projects/$KAAS_PROJECT_ID/elastic-ips}"
+        ATTACH_URL="${KAAS_EIP_ATTACH_URL:-$KAAS_API_BASE_URL/v1/projects/$KAAS_PROJECT_ID/clusters/$KAAS_CLUSTER_ID/elastic-ips/attach}"
+
+        CREATE_PAYLOAD=$(jq -n \
+          --arg name "$EIP_NAME" \
+          --arg region "$KAAS_REGION" \
+          '{name:$name, region:$region}')
+
+        CREATE_RESPONSE=$(curl -fsS -X POST "$CREATE_URL" \
+          -H "Authorization: Bearer $KAAS_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "$CREATE_PAYLOAD")
+
+        EIP_ID=$(echo "$CREATE_RESPONSE" | jq -r '.id // .elasticIpId // .resourceId // empty')
+        EIP_ADDRESS=$(echo "$CREATE_RESPONSE" | jq -r '.ip // .address // .elasticIp // empty')
+        test -n "$EIP_ID" || die "unable to extract Elastic IP id from Aruba API response"
+
+        ATTACH_PAYLOAD=$(jq -n \
+          --arg elasticIpId "$EIP_ID" \
+          --arg ns "$SERVICE_NAMESPACE" \
+          --arg svc "$SERVICE_NAME" \
+          '{elasticIpId:$elasticIpId, service:{namespace:$ns, name:$svc}}')
+
+        ATTACH_RESPONSE=$(curl -fsS -X POST "$ATTACH_URL" \
+          -H "Authorization: Bearer $KAAS_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "$ATTACH_PAYLOAD")
+
+        echo "Elastic IP provisioned and attached"
+        echo "elastic_ip_id=$EIP_ID"
+        if test -n "$EIP_ADDRESS"
+        then echo "elastic_ip_address=$EIP_ADDRESS"
+        fi
+        echo "$ATTACH_RESPONSE" | jq .
+
   delete:
     silent: true
     desc: rimuove i kubeconfig locali Aruba KaaS importati

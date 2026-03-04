@@ -27,6 +27,7 @@ Usage:
   aruba-kaas connect <kubeconfig>
   aruba-kaas create <kubeconfig>
   aruba-kaas deploy <apihost>
+  aruba-kaas elastic-ip
   aruba-kaas delete
   aruba-kaas info
   aruba-kaas kubeconfig <kubeconfig>
@@ -39,6 +40,7 @@ Usage:
   connect     import Aruba KaaS kubeconfig (absolute path or ~/.kube/<file>) and verify cluster connectivity
   create      connect an existing Aruba KaaS k3s cluster and install cert-manager
   deploy      configure and deploy Nuvolaris using <apihost>
+  elastic-ip  provision and attach an Elastic IP via Aruba API (uses KAAS_API_KEY from .env)
   delete      remove imported local Aruba KaaS kubeconfig files
   info        info on the current Aruba KaaS cluster context
   kubeconfig  import Aruba KaaS kubeconfig from local file (absolute path or ~/.kube/<file>)
