@@ -10,8 +10,9 @@ Come da specifiche globali nel file config.toml, il file agent.md è stato aggio
 
 1. Creazione del comando ops cloud aruba-kaas create basato sull'implementazione k3s
 2. Rimozione della parte di setup k3s tramite SSH poiché k3s è già installato e provisionato da Aruba
-3. Implementazione della connessione al cluster k3s esistente tramite kube config passato tramite file con parametro specifico. 
 4. Mantenimento dell'installazione di cert-manager e degli altri passi per la configurazione di nuvolaris
 
 5. aggiunta di un nuovo task chiamato deploy che esegua i comandi che sono nel file di esempio script installazione esempio e accetti come parametro in input l'apihost 
+
+6. aggiunta di un nuovo task chiamato connect dove passiamo il file kubeconfig e viene fatta una prova di connnesione al cluster e vengono mostrati lo stato dei nodi e la versione. 
 

@@ -38,15 +38,16 @@ tasks:
     desc: importa il kubeconfig Aruba KaaS da file locale
     cmds:
       - |
-        if test -e "$CONFIG"
-        then cp "$CONFIG" "$OPS_TMP/kubeconfig"
-             cp "$CONFIG" "$OPS_TMP/aruba-kaas.kubeconfig"
-        else echo "$CONFIG not found" ; false
+        CONFIG_INPUT="{{._kubeconfig_}}"
+        if test -e "$CONFIG_INPUT"
+        then CONFIG="$CONFIG_INPUT"
+        elif test -e "$HOME/.kube/$CONFIG_INPUT"
+        then CONFIG="$HOME/.kube/$CONFIG_INPUT"
+        else echo "$CONFIG_INPUT not found (use absolute path or a file in ~/.kube)" ; false
         fi
+        cp "$CONFIG" "$OPS_TMP/kubeconfig"
+        cp "$CONFIG" "$OPS_TMP/aruba-kaas.kubeconfig"
       - kubectl --kubeconfig "$OPS_TMP/kubeconfig" cluster-info >/dev/null
-    env:
-      CONFIG:
-        sh: realpath {{._kubeconfig_}}
 
   cert-manager:
     silent: true
@@ -55,20 +56,29 @@ tasks:
       - task: get-cert-manager
       - kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f cert-manager.yaml
 
+  connect:
+    silent: true
+    desc: importa <kubeconfig>, verifica la connessione e mostra nodi/versione cluster
+    cmds:
+      - test -n "{{._kubeconfig_}}" || die "required <kubeconfig> file path"
+      - task: copy-kubeconfig
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" version
+
   create:
     silent: true
     desc: collega un cluster Aruba KaaS esistente usando <kubeconfig> e installa cert-manager
     cmds:
-      - test -n "{{._kubeconfig_}}" || die "required <kubeconfig> file path"
       - config OPERATOR_CONFIG_KUBE=k3s
-      - task: copy-kubeconfig
+      - task: connect
       - task: cert-manager
 
   deploy:
     silent: true
     desc: configura e avvia il deploy di Nuvolaris usando <apihost>
     cmds:
-      - test -e "$OPS_TMP/kubeconfig" || die "cluster non configurato: esegui prima 'ops cloud aruba-kaas create <kubeconfig>'"
+      - |
+        test -e "$OPS_TMP/kubeconfig" || die "cluster non configurato: esegui prima 'ops cloud aruba-kaas create <kubeconfig>'"
       - test -n "{{._apihost_}}" || die "required <apihost>"
       - $OPS config slim
       - >

@@ -24,6 +24,7 @@ Create and Manage Aruba KaaS cluster
 
 ```text
 Usage:
+  aruba-kaas connect <kubeconfig>
   aruba-kaas create <kubeconfig>
   aruba-kaas deploy <apihost>
   aruba-kaas delete
@@ -35,10 +36,11 @@ Usage:
 ## Commands
 
 ```
+  connect     import Aruba KaaS kubeconfig (absolute path or ~/.kube/<file>) and verify cluster connectivity
   create      connect an existing Aruba KaaS k3s cluster and install cert-manager
   deploy      configure and deploy Nuvolaris using <apihost>
   delete      remove imported local Aruba KaaS kubeconfig files
   info        info on the current Aruba KaaS cluster context
-  kubeconfig  import Aruba KaaS kubeconfig from local file
+  kubeconfig  import Aruba KaaS kubeconfig from local file (absolute path or ~/.kube/<file>)
   status      status of the current Aruba KaaS cluster
 ```
