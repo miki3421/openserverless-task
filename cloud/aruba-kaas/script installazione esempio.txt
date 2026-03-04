@@ -1,0 +1,24 @@
+
+ops config slim
+
+      ops config volumes \
+        --couchdb=10 \
+        --redisvol=5 \
+        --storage=50 \
+        --pgvol=10 \
+        --mongodbvol=10 \
+        --etcdvol=10 \
+        --mvvol=10 \
+        --seaweedfsvol=10 \
+        --kafka=10 \
+        --zookeeper=5 \
+        --mvzookvol=5 \
+        --pulsarjournalvol=5 \
+        --pulsarledgelvol=5 \
+        --alerting=5
+
+      ops config apihost __APIHOST__ --protocol=https --tls:test@nuvolaris.org
+
+      ops setup cluster
+ 
+

@@ -1,0 +1,125 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+version: "3"
+
+vars:
+  CERTMANAGER: "https://github.com/cert-manager/cert-manager/releases/download/v1.11.0/cert-manager.yaml"
+
+env:
+  KUBECONFIG:
+    sh: |-
+      if test -e "$OPS_TMP/kubeconfig"
+      then echo "$OPS_TMP/kubeconfig"
+      else echo ~/.kube/config
+      fi
+
+tasks:
+  get-cert-manager:
+    cmds:
+      - curl -L "{{.CERTMANAGER}}" >cert-manager.yaml
+
+  copy-kubeconfig:
+    silent: true
+    desc: importa il kubeconfig Aruba KaaS da file locale
+    cmds:
+      - |
+        if test -e "$CONFIG"
+        then cp "$CONFIG" "$OPS_TMP/kubeconfig"
+             cp "$CONFIG" "$OPS_TMP/aruba-kaas.kubeconfig"
+        else echo "$CONFIG not found" ; false
+        fi
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" cluster-info >/dev/null
+    env:
+      CONFIG:
+        sh: realpath {{._kubeconfig_}}
+
+  cert-manager:
+    silent: true
+    desc: installa cert-manager nel cluster Aruba KaaS
+    cmds:
+      - task: get-cert-manager
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f cert-manager.yaml
+
+  create:
+    silent: true
+    desc: collega un cluster Aruba KaaS esistente usando <kubeconfig> e installa cert-manager
+    cmds:
+      - test -n "{{._kubeconfig_}}" || die "required <kubeconfig> file path"
+      - config OPERATOR_CONFIG_KUBE=k3s
+      - task: copy-kubeconfig
+      - task: cert-manager
+
+  deploy:
+    silent: true
+    desc: configura e avvia il deploy di Nuvolaris usando <apihost>
+    cmds:
+      - test -e "$OPS_TMP/kubeconfig" || die "cluster non configurato: esegui prima 'ops cloud aruba-kaas create <kubeconfig>'"
+      - test -n "{{._apihost_}}" || die "required <apihost>"
+      - $OPS config slim
+      - >
+        $OPS config volumes
+        --couchdb=10
+        --redisvol=5
+        --storage=50
+        --pgvol=10
+        --mongodbvol=10
+        --etcdvol=10
+        --mvvol=10
+        --seaweedfsvol=10
+        --kafka=10
+        --zookeeper=5
+        --mvzookvol=5
+        --pulsarjournalvol=5
+        --pulsarledgelvol=5
+        --alerting=5
+      - $OPS config apihost "{{._apihost_}}" --protocol=https --tls:test@nuvolaris.org
+      - $OPS setup cluster
+
+  delete:
+    silent: true
+    desc: rimuove i kubeconfig locali Aruba KaaS importati
+    cmds:
+      - rm -f "$OPS_TMP/kubeconfig" "$OPS_TMP/aruba-kaas.kubeconfig"
+
+  status:
+    desc: stato del cluster Aruba KaaS corrente
+    silent: true
+    cmds:
+      - |
+        if test -e "$OPS_TMP/kubeconfig"
+        then kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes
+        else echo "No Cluster Configured"
+        fi
+
+  info:
+    silent: true
+    desc: informazioni del cluster Aruba KaaS corrente
+    cmds:
+      - echo KUBECONFIG="$KUBECONFIG"
+      - |
+        if test -e "$OPS_TMP/kubeconfig"
+        then kubectl --kubeconfig "$OPS_TMP/kubeconfig" config current-context
+        else echo "current-context: not configured"
+        fi
+
+  kubeconfig:
+    silent: true
+    desc: importa il kubeconfig Aruba KaaS da <kubeconfig>
+    cmds:
+      - test -n "{{._kubeconfig_}}" || die "required <kubeconfig> file path"
+      - task: copy-kubeconfig
