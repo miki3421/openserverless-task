@@ -35,4 +35,5 @@ gke           Google Cloud - GKE subcommands
 k3s           Rancher K3S subcommands
 mk8s          Ubuntu MicroK8s subcommands
 osh           RedHat OpenShift subcommands
+aruba-kaas    Aruba Kaas subcommands
 ```

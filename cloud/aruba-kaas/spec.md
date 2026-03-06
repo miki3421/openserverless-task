@@ -17,3 +17,32 @@ Come da specifiche globali nel file config.toml, il file agent.md è stato aggio
 6. aggiunta di un nuovo task chiamato connect dove passiamo il file kubeconfig e viene fatta una prova di connnesione al cluster e vengono mostrati lo stato dei nodi e la versione. 
 
 7. aggiunta di un nuovo task che permette tramite Aruba api di fare provisioning del'elastic ip da aggangiare al cluster per pubblicare all'esterno il servizio e usare KAAS_API_KEY per autenticarsi
+
+8. aggiungere prima della installazione di nuvolaris i sequenti comandi 
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+helm upgrade --install \
+ingress-nginx ingress-nginx/ingress-nginx \
+--set controller.ingressClassResource.default=true \
+--namespace ingress-nginx \
+--create-namespace
+
+kubectl get service --namespace ingress-nginx ingress-nginx-controller --output wide
+
+9. creare uno script che permette l'installazione di nuvolaris con i seguenti step: 
+
+    A. installazione ingress-nginx
+    B. installazione cert-manager
+    C. esecuzione in parallello:  della patch di mongodb e dell'installazione di nuvolaris. quando il pod mongodb è pronto, si fa patch e cancellazione del pod per prendere le modifiche. 
+    D. configurazione ingress nginx LoadBalancer Aruba se necessario
+
+REGOLE:
+
+10. aggiornare sempre readme.md con le istruzioni per l'installazione e l'utilizzo del tool
+11. aggiornare un file agent.md in questa folder con il log delle attività dell'agente AI.
+12. aggiungere alle specifiche nuove specifiche impartire tramite chat. 
+    
+
+

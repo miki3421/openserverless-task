@@ -45,3 +45,7 @@ tasks:
   
   osh:
     desc: RedHat OpenShift subcommands
+
+  aruba-kaas:
+    desc: Aruba KaaS subcommands
+    

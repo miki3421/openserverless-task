@@ -29,6 +29,28 @@ env:
       fi
 
 tasks:
+  ensure-kubeconfig:
+    silent: true
+    desc: "assicura la presenza di un kubeconfig valido in $OPS_TMP/kubeconfig (fallback: $KUBECONFIG o ~/.kube/config)"
+    cmds:
+      - |
+        if test -e "$OPS_TMP/kubeconfig"
+        then
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" cluster-info >/dev/null
+          exit 0
+        fi
+
+        if test -n "${KUBECONFIG:-}" && test -e "$KUBECONFIG"
+        then
+          cp "$KUBECONFIG" "$OPS_TMP/kubeconfig"
+        elif test -e "$HOME/.kube/config"
+        then
+          cp "$HOME/.kube/config" "$OPS_TMP/kubeconfig"
+        else
+          die "kubeconfig non trovato: esegui 'ops cloud aruba-kaas create <kubeconfig>' oppure imposta KUBECONFIG"
+        fi
+        kubectl --kubeconfig "$OPS_TMP/kubeconfig" cluster-info >/dev/null
+
   get-cert-manager:
     cmds:
       - curl -L "{{.CERTMANAGER}}" >cert-manager.yaml
@@ -53,6 +75,7 @@ tasks:
     silent: true
     desc: installa cert-manager nel cluster Aruba KaaS
     cmds:
+      - task: ensure-kubeconfig
       - task: get-cert-manager
       - kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f cert-manager.yaml
 
@@ -77,28 +100,72 @@ tasks:
     silent: true
     desc: configura e avvia il deploy di Nuvolaris usando <apihost>
     cmds:
+      - task: ensure-kubeconfig
+      - task: install-nuvolaris
+        vars:
+          _apihost_: "{{._apihost_}}"
+
+  preflight-ingress:
+    silent: false
+    desc: seleziona automaticamente un ingress class compatibile con il cluster Aruba KaaS
+    cmds:
+      - task: ensure-kubeconfig
       - |
-        test -e "$OPS_TMP/kubeconfig" || die "cluster non configurato: esegui prima 'ops cloud aruba-kaas create <kubeconfig>'"
-      - test -n "{{._apihost_}}" || die "required <apihost>"
-      - $OPS config slim
-      - >
-        $OPS config volumes
-        --couchdb=10
-        --redisvol=5
-        --storage=50
-        --pgvol=10
-        --mongodbvol=10
-        --etcdvol=10
-        --mvvol=10
-        --seaweedfsvol=10
-        --kafka=10
-        --zookeeper=5
-        --mvzookvol=5
-        --pulsarjournalvol=5
-        --pulsarledgelvol=5
-        --alerting=5
-      - $OPS config apihost "{{._apihost_}}" --protocol=https --tls:test@nuvolaris.org
-      - $OPS setup cluster
+        echo "[aruba-kaas][preflight-ingress] Avvio controllo ingress class del cluster..."
+        SERVER_VERSION_RAW="$(kubectl --kubeconfig "$OPS_TMP/kubeconfig" version --output=yaml 2>/dev/null | rg '^  gitVersion:' | head -n1 | sed -E 's/^  gitVersion:[[:space:]]*\"?([^\"[:space:]]+)\"?/\1/' || true)"
+        if test -n "$SERVER_VERSION_RAW"
+        then
+          K3S_VERSION_RAW="$SERVER_VERSION_RAW"
+          K3S_VERSION="$(echo "$K3S_VERSION_RAW" | sed -E 's/^v([0-9]+\.[0-9]+).*/\1/')"
+          echo "[aruba-kaas][preflight-ingress] Versione rilevata da kubectl version: $K3S_VERSION_RAW (normalizzata: $K3S_VERSION)"
+        else
+          K3S_VERSION_RAW="$(kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' | head -n1 || true)"
+          K3S_VERSION="$(echo "$K3S_VERSION_RAW" | sed -E 's/^v([0-9]+\.[0-9]+).*/\1/')"
+          echo "[aruba-kaas][preflight-ingress] WARNING: kubectl version non disponibile; fallback su kubeletVersion: $K3S_VERSION_RAW (normalizzata: $K3S_VERSION)"
+        fi
+        if test -z "$K3S_VERSION"
+        then
+          DEBUG_PAUSE_SECONDS="${DEBUG_PAUSE_SECONDS:-20}"
+          echo "[aruba-kaas][preflight-ingress] Nessuna versione utile rilevata."
+          echo "[aruba-kaas][preflight-ingress] DEBUG kubeletVersion rilevate sui nodi:"
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' || true
+          echo "[aruba-kaas][preflight-ingress] Pausa debug di ${DEBUG_PAUSE_SECONDS}s (override con DEBUG_PAUSE_SECONDS=<n>)."
+          sleep "$DEBUG_PAUSE_SECONDS"
+          echo "[aruba-kaas][preflight-ingress] Mantengo la configurazione ingress attuale."
+          exit 0
+        fi
+        if awk -v v="$K3S_VERSION" 'BEGIN { split(v,a,"."); exit !((a[1] > 1) || (a[1] == 1 && a[2] > 3)) }'
+        then
+          echo "[aruba-kaas][preflight-ingress] k3s > 1.3: imposto ingress class nginx di default."
+          $OPS config ingress --class=nginx
+          echo "[aruba-kaas][preflight-ingress] Ingress class configurata su nginx."
+        else
+          echo "[aruba-kaas][preflight-ingress] k3s <= 1.3: mantengo la configurazione ingress attuale."
+        fi
+
+  install-ingress-nginx:
+    silent: true
+    desc: installa/aggiorna ingress-nginx e mostra il service controller
+    cmds:
+      - task: ensure-kubeconfig
+      - |
+        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+        helm repo update
+        helm upgrade --install \
+          ingress-nginx ingress-nginx/ingress-nginx \
+          --set controller.ingressClassResource.default=true \
+          --set controller.progressDeadlineSeconds=600 \
+          --namespace ingress-nginx \
+          --create-namespace \
+          --kubeconfig "$OPS_TMP/kubeconfig"
+        kubectl --kubeconfig "$OPS_TMP/kubeconfig" get service --namespace ingress-nginx ingress-nginx-controller --output wide
+
+  install-nuvolaris:
+    silent: true
+    desc: installa Nuvolaris seguendo lo script Aruba KaaS (ingress, cert-manager, setup+mongodb patch, LB)
+    cmds:
+      - task: ensure-kubeconfig
+      - sh "{{.TASKFILE_DIR}}/install-nuvolaris.sh" "{{._apihost_}}"
 
   elastic-ip:
     silent: true
@@ -109,6 +176,8 @@ tasks:
       - |
         if test -f "$HOME/.kube/.env"
         then set -a; . "$HOME/.kube/.env"; set +a
+        elif test -f "{{.TASKFILE_DIR}}/.env"
+        then set -a; . "{{.TASKFILE_DIR}}/.env"; set +a
         elif test -f ".env"
         then set -a; . ".env"; set +a
         fi
@@ -156,32 +225,155 @@ tasks:
         fi
         echo "$ATTACH_RESPONSE" | jq .
 
+  create-lb:
+    silent: true
+    desc: "espone un deployment con Service type=LoadBalancer su porte 80 e 443"
+    cmds:
+      - task: ensure-kubeconfig
+      - |
+        test -n "{{._namespace_}}" || die "required <namespace>"
+        test -n "{{._deployment_}}" || die "required <deployment>"
+        test -n "{{._service_}}" || die "required <service>"
+
+        # forza mappatura HTTP/HTTPS standard (porta esterna:porta interna)
+        if test -n "{{._port_}}"
+        then
+          echo "[aruba-kaas][create-lb] parametro <ports> ignorato: utilizzo mapping standard 80:80 e 443:443"
+        fi
+        PORT_LIST="80:80,443:443"
+
+        NAMESPACE="{{._namespace_}}"
+        DEPLOYMENT="{{._deployment_}}"
+        SERVICE="{{._service_}}"
+
+        MANIFEST="$OPS_TMP/${SERVICE}-loadbalancer.yaml"
+        SERVICE_EXISTS=""
+        if kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get svc "$SERVICE" >/dev/null 2>&1
+        then
+          SERVICE_EXISTS="1"
+        fi
+
+        PORT_ENTRIES="[]"
+        for ITEM in $(echo "$PORT_LIST" | tr ',' ' ')
+        do
+          ITEM_CLEAN="$(echo "$ITEM" | tr -d '[:space:]')"
+          if test -z "$ITEM_CLEAN"
+          then
+            continue
+          fi
+          PORT="$ITEM_CLEAN"
+          TARGET="$PORT"
+          if echo "$ITEM_CLEAN" | grep -q ':'
+          then
+            PORT="${ITEM_CLEAN%%:*}"
+            TARGET="${ITEM_CLEAN##*:}"
+          fi
+
+          PORT_NAME=""
+          if test "$PORT" = "80"
+          then
+            PORT_NAME="http"
+          elif test "$PORT" = "443"
+          then
+            PORT_NAME="https"
+          else
+            PORT_NAME="tcp-$PORT"
+          fi
+
+          PORT_ENTRY="$(printf '{"name":"%s","protocol":"TCP","port":%s,"targetPort":%s}' "$PORT_NAME" "$PORT" "$TARGET")"
+          PORT_ENTRIES="$(printf '%s' "$PORT_ENTRIES" | jq ". + [${PORT_ENTRY}]")"
+        done
+
+        BASE_PORT="$(echo "$PORT_ENTRIES" | jq -r '.[0].port')"
+        BASE_TARGET="$(echo "$PORT_ENTRIES" | jq -r '.[0].targetPort')"
+        if test "$BASE_PORT" = "null" -o -z "$BASE_PORT"
+        then
+          die "invalid ports definition: $PORT_LIST"
+        fi
+
+        SELECTOR_JSON="$(kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get deployment "$DEPLOYMENT" -o json | jq -c '.spec.selector.matchLabels')"
+        test "$SELECTOR_JSON" != "null" -a -n "$SELECTOR_JSON" || die "unable to extract deployment selector for '$DEPLOYMENT'"
+
+        if test -n "$SERVICE_EXISTS"
+        then
+          echo "[aruba-kaas][create-lb] Service '$SERVICE' già esistente, applico patch non distruttiva."
+          PATCH_PAYLOAD="$(jq -n --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" '{spec:{type:"LoadBalancer", selector:$selector, ports:$ports}}')"
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" patch svc "$SERVICE" --type merge -p "$PATCH_PAYLOAD" || die "failed to patch existing service"
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get svc "$SERVICE" -o json > "$MANIFEST"
+        else
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" \
+            expose deployment "$DEPLOYMENT" --name "$SERVICE" --type=LoadBalancer --port="$BASE_PORT" --target-port="$BASE_TARGET" --dry-run=client -o json > "$MANIFEST" || die "failed to generate service manifest"
+          jq --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" '.spec.ports = $ports | .spec.selector = $selector' "$MANIFEST" > "${MANIFEST}.tmp" || die "failed to patch service manifest"
+          mv "${MANIFEST}.tmp" "$MANIFEST"
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f "$MANIFEST" || die "failed to apply service manifest"
+        fi
+        echo "Manifest generato in $MANIFEST:"
+        cat "$MANIFEST"
+        echo ""
+        echo "Verifica IP esterno:"
+        kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get svc "$SERVICE" -o wide
+
+  fix-mongodb-permissions:
+    silent: true
+    desc: applica fix permessi PVC di mongodb/ferretdb (fsGroup) e riavvia lo StatefulSet
+    cmds:
+      - task: ensure-kubeconfig
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f cloud/aruba-kaas/mongodb-fix-fsgroup.yaml
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n nuvolaris rollout restart sts/nuvolaris-mongodb
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n nuvolaris rollout status sts/nuvolaris-mongodb --timeout=240s
+
   delete:
     silent: true
-    desc: rimuove i kubeconfig locali Aruba KaaS importati
+    desc: forza la rimozione del namespace nuvolaris (kill finalizer)
     cmds:
-      - rm -f "$OPS_TMP/kubeconfig" "$OPS_TMP/aruba-kaas.kubeconfig"
+      - task: ensure-kubeconfig
+      - |
+        NS="nuvolaris"
+        echo "[aruba-kaas][delete] Richiesta eliminazione namespace '$NS'..."
+        if ! kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" >/dev/null 2>&1
+        then
+          echo "[aruba-kaas][delete] Namespace '$NS' non presente."
+        else
+          kubectl --kubeconfig "$OPS_TMP/kubeconfig" delete ns "$NS" --wait=false || true
+          for i in $(seq 1 20)
+          do
+            if kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" >/dev/null 2>&1
+            then
+              PHASE="$(kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+              echo "[aruba-kaas][delete] Namespace in stato '$PHASE' (tentativo $i/20)..."
+              sleep 2
+            else
+              echo "[aruba-kaas][delete] Namespace '$NS' eliminato."
+              break
+            fi
+          done
+          if kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" >/dev/null 2>&1
+          then
+            echo "[aruba-kaas][delete] Namespace ancora presente: rimozione forzata finalizer..."
+            kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" -o json \
+              | jq '.spec.finalizers=[]' \
+              | kubectl --kubeconfig "$OPS_TMP/kubeconfig" replace --raw "/api/v1/namespaces/$NS/finalize" -f -
+            sleep 2
+            kubectl --kubeconfig "$OPS_TMP/kubeconfig" get ns "$NS" >/dev/null 2>&1 \
+              && die "namespace '$NS' ancora presente dopo finalize forzato"
+            echo "[aruba-kaas][delete] Namespace '$NS' eliminato (forced finalize)."
+          fi
+        fi
 
   status:
     desc: stato del cluster Aruba KaaS corrente
     silent: true
     cmds:
-      - |
-        if test -e "$OPS_TMP/kubeconfig"
-        then kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes
-        else echo "No Cluster Configured"
-        fi
+      - task: ensure-kubeconfig
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" get nodes
 
   info:
     silent: true
     desc: informazioni del cluster Aruba KaaS corrente
     cmds:
+      - task: ensure-kubeconfig
       - echo KUBECONFIG="$KUBECONFIG"
-      - |
-        if test -e "$OPS_TMP/kubeconfig"
-        then kubectl --kubeconfig "$OPS_TMP/kubeconfig" config current-context
-        else echo "current-context: not configured"
-        fi
+      - kubectl --kubeconfig "$OPS_TMP/kubeconfig" config current-context
 
   kubeconfig:
     silent: true
