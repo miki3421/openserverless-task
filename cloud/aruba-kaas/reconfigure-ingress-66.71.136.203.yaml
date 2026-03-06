@@ -1,0 +1,214 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apihost
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /api/v1/$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: 66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /api/v1(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: controller
+                port:
+                  number: 3233
+  tls:
+    - hosts:
+        - 66.71.136.203.nip.io
+      secretName: nuvolaris-crt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apihost-info
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: 66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /api/info(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: controller
+                port:
+                  number: 3233
+  tls:
+    - hosts:
+        - 66.71.136.203.nip.io
+      secretName: nuvolaris-crt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apihost-my
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /api/v1/web/nuvolaris/$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: 66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /api/my(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: controller
+                port:
+                  number: 3233
+  tls:
+    - hosts:
+        - 66.71.136.203.nip.io
+      secretName: nuvolaris-crt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apihost-static-ingress
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /nuvolaris-web/$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: 66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nuvolaris-static-svc
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - 66.71.136.203.nip.io
+      secretName: nuvolaris-crt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apihost-www-my
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /api/v1/web/nuvolaris/$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: www.66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /api/my(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: controller
+                port:
+                  number: 3233
+  tls:
+    - hosts:
+        - www.66.71.136.203.nip.io
+      secretName: nuvolaris-crt-www
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seaweedfs-s3
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: s3.66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: seaweedfs
+                port:
+                  number: 9000
+  tls:
+    - hosts:
+        - s3.66.71.136.203.nip.io
+      secretName: nuvolaris-seaweedfs-s3-crt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: www-nuvolaris-static-ingress
+  namespace: nuvolaris
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/rewrite-target: /nuvolaris-web/$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: www.66.71.136.203.nip.io
+      http:
+        paths:
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nuvolaris-static-svc
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - www.66.71.136.203.nip.io
+      secretName: www-nuvolaris-crt

@@ -26,6 +26,16 @@ fi
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 CERT_MANAGER_URL="${CERT_MANAGER_URL:-https://github.com/cert-manager/cert-manager/releases/download/v1.11.0/cert-manager.yaml}"
 CERT_MANAGER_MANIFEST="$SCRIPT_DIR/cert-manager.yaml"
+INGRESS_LB_ADDRESS="${KAAS_INGRESS_LB_ADDRESS:-}"
+
+if [ -z "$INGRESS_LB_ADDRESS" ]; then
+  INGRESS_LB_ADDRESS="$(printf '%s\n' "$APIHOST" | sed -nE 's/^(([0-9]{1,3}\.){3}[0-9]{1,3})(\.nip\.io)?$/\1/p')"
+fi
+
+if [ -n "$INGRESS_LB_ADDRESS" ]; then
+  export KAAS_INGRESS_LB_ADDRESS="$INGRESS_LB_ADDRESS"
+  echo "[aruba-kaas][install] IP pubblico LB: $INGRESS_LB_ADDRESS"
+fi
 
 echo "[aruba-kaas][install] Step A: installazione ingress-nginx"
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
@@ -44,6 +54,13 @@ task --taskfile "$SCRIPT_DIR/opsfile.yml" create-lb \
   _namespace_=ingress-nginx \
   _deployment_=ingress-nginx-controller \
   _service_=ingress-nginx-controller
+if [ -n "$INGRESS_LB_ADDRESS" ]; then
+  echo "[aruba-kaas][install] Step B.1: associazione Elastic IP esistente al LoadBalancer Aruba"
+  task --taskfile "$SCRIPT_DIR/opsfile.yml" attach-eip \
+    _namespace_=ingress-nginx \
+    _service_=ingress-nginx-controller \
+    _address_="$INGRESS_LB_ADDRESS"
+fi
 
 echo "[aruba-kaas][install] Step C: installazione cert-manager"
 if [ ! -f "$CERT_MANAGER_MANIFEST" ]; then
@@ -75,7 +92,7 @@ task --taskfile "$SCRIPT_DIR/opsfile.yml" preflight-ingress
 echo "[aruba-kaas][install] Step D: setup cluster e patch mongodb in parallelo"
 "$SCRIPT_DIR/setup-cluster-and-patch-mongodb.sh" "$OPS" "$KUBECONFIG_PATH"
 
-echo "[aruba-kaas][install] Step E: configurazione Aruba LB su ingress-nginx se necessario (opzionale)"
+echo "[aruba-kaas][install] Step E: verifica configurazione Aruba LB su ingress-nginx"
 if [ -n "${KAAS_INGRESS_LB_ADDRESS:-}" ]; then
   kubectl --kubeconfig "$KUBECONFIG_PATH" -n ingress-nginx annotate svc ingress-nginx-controller \
     loadbalancer.openstack.org/load-balancer-address="$KAAS_INGRESS_LB_ADDRESS" \

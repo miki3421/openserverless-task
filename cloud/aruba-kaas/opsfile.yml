@@ -225,6 +225,61 @@ tasks:
         fi
         echo "$ATTACH_RESPONSE" | jq .
 
+  attach-eip:
+    silent: true
+    desc: associa un Elastic IP esistente a un Service Kubernetes via Aruba API
+    cmds:
+      - curl --version >/dev/null || die "curl command not found"
+      - jq --version >/dev/null || die "jq command not found"
+      - |
+        if test -f "$HOME/.kube/.env"
+        then set -a; . "$HOME/.kube/.env"; set +a
+        elif test -f "{{.TASKFILE_DIR}}/.env"
+        then set -a; . "{{.TASKFILE_DIR}}/.env"; set +a
+        elif test -f ".env"
+        then set -a; . ".env"; set +a
+        fi
+      - test -n "$KAAS_API_KEY" || die "missing KAAS_API_KEY (set it in .env)"
+      - test -n "$KAAS_API_BASE_URL" || die "missing KAAS_API_BASE_URL (set it in .env)"
+      - test -n "$KAAS_PROJECT_ID" || die "missing KAAS_PROJECT_ID (set it in .env)"
+      - test -n "$KAAS_CLUSTER_ID" || die "missing KAAS_CLUSTER_ID (set it in .env)"
+      - |
+        SERVICE_NAMESPACE="{{._namespace_}}"
+        SERVICE_NAME="{{._service_}}"
+        TARGET_ADDRESS="{{._address_}}"
+        TARGET_EIP_ID="{{._elastic_ip_id_}}"
+        LIST_URL="${KAAS_EIP_LIST_URL:-$KAAS_API_BASE_URL/v1/projects/$KAAS_PROJECT_ID/elastic-ips}"
+        ATTACH_URL="${KAAS_EIP_ATTACH_URL:-$KAAS_API_BASE_URL/v1/projects/$KAAS_PROJECT_ID/clusters/$KAAS_CLUSTER_ID/elastic-ips/attach}"
+
+        test -n "$SERVICE_NAMESPACE" || die "required <namespace>"
+        test -n "$SERVICE_NAME" || die "required <service>"
+
+        if test -z "$TARGET_EIP_ID"
+        then
+          test -n "$TARGET_ADDRESS" || die "required <address> or <elastic_ip_id>"
+          LIST_RESPONSE="$(curl -fsS "$LIST_URL" -H "Authorization: Bearer $KAAS_API_KEY")"
+          TARGET_EIP_ID="$(printf '%s' "$LIST_RESPONSE" | jq -r --arg address "$TARGET_ADDRESS" '[.. | objects | select((.ip // .address // .elasticIp // "") == $address) | (.id // .elasticIpId // .resourceId // empty)] | map(select(. != "")) | .[0] // empty')"
+          test -n "$TARGET_EIP_ID" || die "unable to find Elastic IP with address '$TARGET_ADDRESS'"
+        fi
+
+        ATTACH_PAYLOAD="$(jq -n \
+          --arg elasticIpId "$TARGET_EIP_ID" \
+          --arg ns "$SERVICE_NAMESPACE" \
+          --arg svc "$SERVICE_NAME" \
+          '{elasticIpId:$elasticIpId, service:{namespace:$ns, name:$svc}}')"
+
+        ATTACH_RESPONSE="$(curl -fsS -X POST "$ATTACH_URL" \
+          -H "Authorization: Bearer $KAAS_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "$ATTACH_PAYLOAD")"
+
+        echo "Elastic IP attached"
+        echo "elastic_ip_id=$TARGET_EIP_ID"
+        if test -n "$TARGET_ADDRESS"
+        then echo "elastic_ip_address=$TARGET_ADDRESS"
+        fi
+        echo "$ATTACH_RESPONSE" | jq .
+
   create-lb:
     silent: true
     desc: "espone un deployment con Service type=LoadBalancer su porte 80 e 443"
@@ -245,6 +300,8 @@ tasks:
         NAMESPACE="{{._namespace_}}"
         DEPLOYMENT="{{._deployment_}}"
         SERVICE="{{._service_}}"
+        LB_ADDRESS="${KAAS_INGRESS_LB_ADDRESS:-}"
+        LB_ID="${KAAS_INGRESS_LB_ID:-}"
 
         MANIFEST="$OPS_TMP/${SERVICE}-loadbalancer.yaml"
         SERVICE_EXISTS=""
@@ -294,16 +351,26 @@ tasks:
         SELECTOR_JSON="$(kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get deployment "$DEPLOYMENT" -o json | jq -c '.spec.selector.matchLabels')"
         test "$SELECTOR_JSON" != "null" -a -n "$SELECTOR_JSON" || die "unable to extract deployment selector for '$DEPLOYMENT'"
 
+        ANNOTATIONS_JSON='{}'
+        if test -n "$LB_ADDRESS"
+        then
+          ANNOTATIONS_JSON="$(printf '%s' "$ANNOTATIONS_JSON" | jq --arg value "$LB_ADDRESS" '. + {"loadbalancer.openstack.org/load-balancer-address": $value}')"
+        fi
+        if test -n "$LB_ID"
+        then
+          ANNOTATIONS_JSON="$(printf '%s' "$ANNOTATIONS_JSON" | jq --arg value "$LB_ID" '. + {"loadbalancer.openstack.org/load-balancer-id": $value}')"
+        fi
+
         if test -n "$SERVICE_EXISTS"
         then
           echo "[aruba-kaas][create-lb] Service '$SERVICE' già esistente, applico patch non distruttiva."
-          PATCH_PAYLOAD="$(jq -n --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" '{spec:{type:"LoadBalancer", selector:$selector, ports:$ports}}')"
+          PATCH_PAYLOAD="$(jq -n --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" --argjson annotations "$ANNOTATIONS_JSON" '{metadata:{annotations:$annotations},spec:{type:"LoadBalancer", selector:$selector, ports:$ports}}')"
           kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" patch svc "$SERVICE" --type merge -p "$PATCH_PAYLOAD" || die "failed to patch existing service"
           kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" get svc "$SERVICE" -o json > "$MANIFEST"
         else
           kubectl --kubeconfig "$OPS_TMP/kubeconfig" -n "$NAMESPACE" \
             expose deployment "$DEPLOYMENT" --name "$SERVICE" --type=LoadBalancer --port="$BASE_PORT" --target-port="$BASE_TARGET" --dry-run=client -o json > "$MANIFEST" || die "failed to generate service manifest"
-          jq --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" '.spec.ports = $ports | .spec.selector = $selector' "$MANIFEST" > "${MANIFEST}.tmp" || die "failed to patch service manifest"
+          jq --argjson ports "$PORT_ENTRIES" --argjson selector "$SELECTOR_JSON" --argjson annotations "$ANNOTATIONS_JSON" '.metadata.annotations = ((.metadata.annotations // {}) + $annotations) | .spec.ports = $ports | .spec.selector = $selector' "$MANIFEST" > "${MANIFEST}.tmp" || die "failed to patch service manifest"
           mv "${MANIFEST}.tmp" "$MANIFEST"
           kubectl --kubeconfig "$OPS_TMP/kubeconfig" apply -f "$MANIFEST" || die "failed to apply service manifest"
         fi
