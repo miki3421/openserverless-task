@@ -24,9 +24,9 @@ OpenServerless Ide Development Utilities.
 
 ```text
 Usage:
-    ide login [<username>] [<apihost>] [--pin]
+    ide login [<username>] [<apihost>] [--pin] [--mode=<mode>]
+    ide deploy [<action>|--packages|--web] [--dry-run] [--mode=<mode>]
     ide devel [--fast] [--dry-run]
-    ide deploy [<action>|--packages|--web] [--dry-run]
     ide undeploy [<action>] [--dry-run]
     ide clean
     ide setup
@@ -37,6 +37,7 @@ Usage:
     ide python
     ide nodejs
     ide devcontainer
+    ide init
 ```
 
 ## Commands
@@ -55,6 +56,7 @@ Usage:
     ide devcontainer        add a devcontainer configuration
     ide python              python subcommands
     ide nodejs              nodejs subcommands
+    ide init                initialize executing all actions in the init package
 ```
 
 ## Options
@@ -65,4 +67,5 @@ Usage:
 --web           Only deploy web folder, skip packages
 --fast          Skip the initial deployment step and go in incremental update mode
 --pin           Pin the current auth in the .env to check you are not deploying on the wrong user
+--mode          this will load from .env.<mode> after .env
 ```
